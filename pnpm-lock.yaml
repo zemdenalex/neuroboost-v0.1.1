@@ -19,6 +19,9 @@ importers:
       express:
         specifier: 4.19.2
         version: 4.19.2
+      luxon:
+        specifier: 3.4.4
+        version: 3.4.4
       rrule:
         specifier: 2.8.1
         version: 2.8.1
@@ -33,7 +36,7 @@ importers:
   apps/bot: {}
 
   apps/shell:
-    dependencies:
+    devDependencies:
       electron:
         specifier: 30.0.9
         version: 30.0.9
@@ -1008,6 +1011,10 @@ packages:
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+
+  luxon@3.4.4:
+    resolution: {integrity: sha512-zobTr7akeGHnv7eBOXcRgMeCP6+uyYsczwmeRCauvpvaAltgNyTbLH/+VaEAPUeWBT+1GuNmz4wC/6jtQzbbVA==}
+    engines: {node: '>=12'}
 
   matcher@3.0.0:
     resolution: {integrity: sha512-OkeDaAZ/bQCxeFAozM55PKcKU0yJMPGifLwV4Qgjitu+5MoAfSQN4lsLJeXZ1b8w0x+/Emda6MZgXS1jvsapng==}
@@ -2469,6 +2476,8 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+
+  luxon@3.4.4: {}
 
   matcher@3.0.0:
     dependencies:
