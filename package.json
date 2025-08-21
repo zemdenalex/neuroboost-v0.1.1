@@ -1,0 +1,27 @@
+{
+  "name": "neuroboost",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "packageManager": "pnpm@10.14.0",
+  "engines": { "node": ">=20 <21" },
+  "scripts": {
+    "prepare": "pnpm --filter @nb/api prisma:generate",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f db",
+    "db:psql": "docker exec -it nb-postgres psql -U nb_user -d neuroboost",
+    "db:smoke": "docker exec nb-postgres psql -U nb_user -d neuroboost -c \"select 1 as ok;\"",
+    "db:timezone": "docker exec nb-postgres psql -U nb_user -d neuroboost -c \"SHOW TIMEZONE;\"",
+    "prisma:generate": "pnpm --filter @nb/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @nb/api prisma:migrate",
+    "api:dev": "pnpm --filter @nb/api dev",
+    "api:seed": "pnpm --filter @nb/api seed",
+    "export:dry": "pnpm --filter @nb/api export:dry",
+    "web:dev": "pnpm --filter @nb/web dev",
+    "web:build": "pnpm --filter @nb/web build",
+    "web:preview": "pnpm --filter @nb/web preview",
+    "bot:stub": "node apps/bot/src/keyboard.mjs",
+    "shell:dev": "pnpm --filter @nb/shell dev"
+  }
+}

@@ -1,0 +1,5 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --hour-h: 24px; } /* 30m row ~ 24px -> 1h ~ 48px */

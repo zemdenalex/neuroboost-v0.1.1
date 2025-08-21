@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nb-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+      PGTZ: ${TZ:-UTC}
+    command: >
+      postgres -c 'timezone=UTC'
+               -c 'max_connections=50'
+               -c 'shared_buffers=256MB'
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nb_user} -d ${POSTGRES_DB:-neuroboost}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  dbdata:

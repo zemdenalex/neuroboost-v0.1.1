@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Tasks with priorities 0..5, subtasks via self-relation, status.
+model Task {
+  id          String      @id @default(uuid())
+  title       String
+  description String?     @db.Text
+  priority    Int         @default(3)
+  status      TaskStatus  @default(TODO)
+  parentId    String?
+  parent      Task?       @relation("Subtasks", fields: [parentId], references: [id])
+  subtasks    Task[]      @relation("Subtasks")
+  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+  events      Event[]
+}
+
+enum TaskStatus {
+  TODO
+  DONE
+  CANCELLED
+}
+
+/// Calendar blocks (UTC). Optional RRULE (RFC5545 string). Optional tz label (for UI provenance).
+model Event {
+  id           String           @id @default(uuid())
+  title        String
+  startsAt     DateTime         @db.Timestamptz(6)
+  endsAt       DateTime         @db.Timestamptz(6)
+  allDay       Boolean          @default(false)
+  sourceTaskId String?
+  task         Task?            @relation(fields: [sourceTaskId], references: [id])
+  rrule        String?
+  tz           String?
+  createdAt    DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(6)
+  exceptions   EventException[]
+  reminders    Reminder[]
+  reflections  Reflection[]
+}
+
+model EventException {
+  id          String   @id @default(uuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  occurrence  DateTime @db.Timestamptz(6)  // start time of the skipped/changed occurrence
+  skipped     Boolean  @default(true)
+  replacementEventId String?
+}
+
+model Reminder {
+  id            String   @id @default(uuid())
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  minutesBefore Int
+  channel       String   @default("telegram")
+}
+
+model Reflection {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  focusPct  Int
+  goalPct   Int
+  mood      Int
+  note      String?  @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Quick notes (for #quick)
+model QuickNote {
+  id        String   @id @default(uuid())
+  body      String   @db.Text
+  tags      String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Export runs (for audit; MVP uses dry-run only)
+model ExportRun {
+  id           String   @id @default(uuid())
+  mode         String   // "dry-run" | "write"
+  startedAt    DateTime @default(now()) @db.Timestamptz(6)
+  finishedAt   DateTime? @db.Timestamptz(6)
+  filesPlanned Int      @default(0)
+  filesWritten Int      @default(0)
+}
