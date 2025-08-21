@@ -18,27 +18,24 @@ $urls = @(
 $downloaded = $false
 foreach ($u in $urls) {
   try {
-    Write-Host "Downloading Electron $Version from $u ..."
+    Write-Host ("Downloading Electron {0} from {1} ..." -f $Version, $u)
     Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $zipPath -TimeoutSec 180
-    $downloaded = $true; break
+    $downloaded = $true
+    break
   } catch {
-    Write-Warning "Download failed from $u : $($_.Exception.Message)"
+    Write-Warning ("Download failed from {0}: {1}" -f $u, $_.Exception.Message)
   }
 }
 if (-not $downloaded -or -not (Test-Path $zipPath)) {
-  throw "Electron $Version zip could not be downloaded from known mirrors."
+  throw ("Could not download Electron {0} from known mirrors." -f $Version)
 }
 
-Write-Host "Extracting $zipPath -> $dest ..."
+Write-Host ("Extracting {0} -> {1} ..." -f $zipPath, $dest)
 Expand-Archive -Force -Path $zipPath -DestinationPath $dest
 
-# Robustly locate electron.exe regardless of nested folders
+# Robustly locate electron.exe (handles extra nesting)
 $exe = Get-ChildItem -Path $dest -Recurse -Filter electron.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $exe) {
-  throw "electron.exe not found anywhere under $dest (extraction may have failed)."
-}
-$overrideDir = $exe.Directory.FullName
-$env:ELECTRON_OVERRIDE_DIST_PATH = $overrideDir
+if (-not $exe) { throw ("electron.exe not found anywhere under {0}." -f $dest) }
 
-Write-Host "Electron ready at: $overrideDir"
-Write-Host "ELECTRON_OVERRIDE_DIST_PATH=$env:ELECTRON_OVERRIDE_DIST_PATH"
+$env:ELECTRON_OVERRIDE_DIST_PATH = $exe.Directory.FullName
+Write-Host ("Electron ready at: {0}" -f $env:ELECTRON_OVERRIDE_DIST_PATH)
