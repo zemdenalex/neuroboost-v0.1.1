@@ -1,31 +1,38 @@
 import { useEffect, useState } from 'react';
-import WeekGrid from './components/WeekGrid';
-import Editor from './components/Editor';
+import { WeekGrid } from './components/WeekGrid'; // named export
+import { Editor } from './components/Editor';      // named export
 import NudgeBadge from './components/NudgeBadge';
+import type { NbEvent } from './types';
+type Range = { start: Date; end: Date } | null;
 
 export default function App() {
-  const [events, setEvents] = useState<any[]>([]);
-  const [draft, setDraft] = useState<any | null>(null);
-
+  const [events, setEvents] = useState<NbEvent[]>([]);
+  const [range, setRange] = useState<Range>(null);
+  
   async function refresh() {
-    const r = await fetch('/events'); // matches your existing API
+    const r = await fetch('/events');
+    if (!r.ok) throw new Error('Failed to load events');
     setEvents(await r.json());
   }
+
   useEffect(() => { refresh(); }, []);
 
-  // WeekGrid contracts — adjust names to your actual props if they differ:
-  function onCreate(slot: any) { setDraft({ ...slot, title: '' }); }
-  async function onMoveOrResize(patch: { id: string, startUtc?: string, endUtc?: string }) {
-    await fetch(`/events/${patch.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+  function onCreate(slot: { startUtc: string; endUtc: string; allDay?: boolean }) {
+    setRange({ start: new Date(slot.startUtc), end: new Date(slot.endUtc) });
+  }
+
+  async function onMoveOrResize(patch: { id: string; startUtc?: string; endUtc?: string }) {
+    const r = await fetch(`/events/${patch.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!r.ok) throw new Error('Failed to move/resize');
     refresh();
   }
-  function onSelect(e: any) { setDraft(e); }
 
-  async function onSubmitDraft(data: any) {
-    await fetch('/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    setDraft(null); refresh();
+  function onSelect(e: NbEvent) {
+    setRange({ start: new Date(e.startUtc), end: new Date(e.endUtc) });
   }
-  function onCancelDraft() { setDraft(null); }
 
   return (
     <div className="flex flex-col h-screen">
@@ -43,8 +50,12 @@ export default function App() {
         />
       </main>
 
-      {draft && (
-        <Editor draft={draft} onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+      {range && (
+        <Editor
+          range={range}
+          onClose={() => setRange(null)}
+          onCreated={() => { setRange(null); refresh(); }}
+        />
       )}
     </div>
   );

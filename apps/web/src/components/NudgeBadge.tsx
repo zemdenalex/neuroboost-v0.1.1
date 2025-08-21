@@ -14,7 +14,8 @@ export default function NudgeBadge() {
 
   useEffect(() => {
     fetch('/status/nudges')
-      .then(r => r.json()).then(setS)
+      .then(r => r.json())
+      .then(setS)
       .catch(e => setErr(String(e)));
   }, []);
 
