@@ -3,6 +3,7 @@ import { WeekGrid } from './components/WeekGrid';
 import { Editor } from './components/Editor';   // named export
 import NudgeBadge from './components/NudgeBadge';
 import type { NbEvent } from './types';
+import DbBadge from './components/DbBadge';
 
 type Range = { start: Date; end: Date } | null;
 
@@ -36,7 +37,10 @@ export default function App() {
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between p-2 border-b">
         <div className="font-semibold">NeuroBoost</div>
-        <NudgeBadge />
+        <div className="flex items-center gap-2">
+          <DbBadge />
+          <NudgeBadge />
+        </div>
       </header>
 
       <main className="flex-1 overflow-hidden">

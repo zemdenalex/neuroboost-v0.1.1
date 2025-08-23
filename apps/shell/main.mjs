@@ -7,12 +7,16 @@ const WEB_URL = process.env.WEB_URL || 'http://localhost:5173';
 const ACTIVE_ROUTE = process.env.ACTIVE_ROUTE || 'electron'; // 'telegram' later
 const DEDUPE_WINDOW_MS = 120_000; // 2 minutes
 const MSK_OFFSET_MS = 3 * 3600_000; // fixed UTC+03:00
+const { app, BrowserWindow, Tray, Menu, globalShortcut } = require('electron');
+const path = require('node:path');
+
+let tray = null;
+let win  = null;
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.neuroboost.app');
 }
 
-let win;
 function createWindow() {
   win = new BrowserWindow({
     width: 1200, height: 800,
@@ -118,3 +122,53 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => { /* keep background */ });
 app.on('before-quit', () => { globalShortcut.unregisterAll(); });
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+else {
+  app.on('second-instance', () => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  });
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280, height: 800,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+
+  // Default URL: dev web server
+  const startUrl = process.env.NB_SHELL_URL || 'http://localhost:5173';
+  win.loadURL(startUrl);
+}
+
+app.whenReady().then(() => {
+  createWindow();
+
+  // Tray
+  try {
+    const iconPath = path.join(__dirname, 'icon.png'); // optional, ignore if missing
+    tray = new Tray(iconPath);
+  } catch { tray = new Tray(null); } // still create tray without icon if needed
+
+  const ctx = Menu.buildFromTemplate([
+    { label: 'Open NeuroBoost', click: () => { if (win) { win.show(); win.focus(); } } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() }
+  ]);
+  tray.setToolTip('NeuroBoost');
+  tray.setContextMenu(ctx);
+  tray.on('click', () => { if (win) { win.show(); win.focus(); } });
+
+  // OPTIONAL: global hotkey (safe; can be removed)
+  if (!process.env.NB_NO_HOTKEY) {
+    const ok = globalShortcut.register('Control+Alt+N', () => {
+      if (win) { win.show(); win.focus(); }
+    });
+    if (!ok) console.warn('[shell] global shortcut registration failed');
+  }
+
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+app.on('will-quit', () => { globalShortcut.unregisterAll(); });

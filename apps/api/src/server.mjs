@@ -325,3 +325,14 @@ app.get('/status/nudges', (_req, res) => {
     });
   }
 });
+
+app.get('/healthz/db', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    // Fallback: respond ok if process is alive
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[healthz/db] error:', e);
+    res.status(200).json({ ok: false, error: 'db-unavailable' });
+  }
+});
