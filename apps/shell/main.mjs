@@ -28,21 +28,26 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Ensure Windows toasts show
+  try { app.setAppUserModelId('com.neuroboost.shell'); } catch {}
+
   createWindow();
 
-  // Tray (safe even if icon missing)
+  // Tray (only if icon exists)
   try {
     let iconPath = path.join(process.cwd(), 'apps', 'shell', 'icon.png');
-    if (!fs.existsSync(iconPath)) iconPath = undefined;
-    tray = new Tray(iconPath);
-    const menu = Menu.buildFromTemplate([
-      { label: 'Open NeuroBoost', click: () => { if (win) { win.show(); win.focus(); } } },
-      { type: 'separator' },
-      { label: 'Quit', click: () => app.quit() },
-    ]);
-    tray.setToolTip('NeuroBoost');
-    tray.setContextMenu(menu);
-    tray.on('click', () => { if (win) { win.show(); win.focus(); } });
+    if (fs.existsSync(iconPath)) {
+      tray = new Tray(iconPath);
+      const menu = Menu.buildFromTemplate([
+        { label: 'Open NeuroBoost', click: () => { if (win) { win.show(); win.focus(); } } },
+        { type: 'separator' }, { label: 'Quit', click: () => app.quit() },
+      ]);
+      tray.setToolTip('NeuroBoost');
+      tray.setContextMenu(menu);
+      tray.on('click', () => { if (win) { win.show(); win.focus(); } });
+    } else {
+      console.warn('[shell] tray icon not found; skipping tray');
+    }
   } catch (e) {
     console.warn('[shell] tray setup failed:', e?.message || e);
   }
@@ -66,10 +71,6 @@ app.on('will-quit', () => { globalShortcut.unregisterAll(); });
 // start only if route is "shell" (default still "telegram-stub")
 const route = process.env.NB_ROUTE_PRIMARY || 'telegram-stub';
 if (route === 'shell') {
-  try {
-    startScheduler();
-    console.log('[shell] scheduler started (T-5/T-1, dedupe 120s)');
-  } catch (e) {
-    console.warn('[shell] scheduler failed:', e?.message || e);
-  }
+  try { startScheduler(); console.log('[shell] scheduler started (T-5/T-1, dedupe 120s)'); }
+  catch (e) { console.warn('[shell] scheduler failed:', e?.message || e); }
 }
