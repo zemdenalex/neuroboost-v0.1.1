@@ -5,6 +5,7 @@ import NudgeBadge from './components/NudgeBadge';
 import DbBadge from './components/DbBadge';
 import type { NbEvent } from './types';
 import { getEvents, patchEventUTC, deleteEvent } from './api';
+import StatsBadge from './components/StatsBadge';
 
 type Range = { start: Date; end: Date } | null;
 
@@ -48,6 +49,7 @@ export default function App() {
       <header className="flex items-center justify-between p-2 border-b">
         <div className="font-semibold">NeuroBoost</div>
         <div className="flex items-center gap-2">
+          <StatsBadge />
           <DbBadge />
           <NudgeBadge />
         </div>
