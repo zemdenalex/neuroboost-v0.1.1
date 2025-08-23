@@ -35,6 +35,11 @@ app.whenReady().then(() => {
 
   // Tray (only if icon exists)
   try {
+  const iconPath = path.join(__dirname, 'assets', 'tray.png');
+  if (fs.existsSync(iconPath)) { tray = new Tray(iconPath); }
+  } catch { /* no tray in MVP; ignore */ }
+
+  try {
     let iconPath = path.join(process.cwd(), 'apps', 'shell', 'icon.png');
     if (fs.existsSync(iconPath)) {
       tray = new Tray(iconPath);

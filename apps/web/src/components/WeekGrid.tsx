@@ -6,9 +6,9 @@ const MSK_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+03:00
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_PX = 48;           // 24h * 48px = 1152px tall
 const MIN_SLOT_MIN = 15;      // snap to 15 minutes
-const GRID_MIN_W = 1680;      // keep 7 columns readable on narrow screens
+const GRID_MIN_W = 1200;      // allow tighter columns on laptops
 
-// --- Helpers: MSK <-> UTC conversions & week building ---
+// --- Helpers ---
 function mondayUtcMidnightOfCurrentWeek(): number {
   const nowUtcMs = Date.now();
   const nowMsk = new Date(nowUtcMs + MSK_OFFSET_MS);
@@ -28,36 +28,30 @@ function minutesSinceMskMidnight(utcISO: string): number {
   const baseUtc = mskMidnightUtcMs(utcMs);
   return Math.max(0, Math.min(1440, Math.round((utcMs - baseUtc) / 60000)));
 }
-function snapMin(mins: number): number {
-  return Math.round(mins / MIN_SLOT_MIN) * MIN_SLOT_MIN;
-}
-function minsToTop(mins: number): number {
-  return (mins / 60) * HOUR_PX;
-}
-function topToMins(topPx: number): number {
-  return (topPx / HOUR_PX) * 60;
-}
-function clampMins(m: number): number {
-  return Math.max(0, Math.min(1440, m));
-}
-function mskDayLabel(mskDate: Date): string {
-  return mskDate.toLocaleDateString('ru-RU', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-}
+const snapMin = (m: number) => Math.round(m / MIN_SLOT_MIN) * MIN_SLOT_MIN;
+const minsToTop = (m: number) => (m / 60) * HOUR_PX;
+const topToMins = (y: number) => (y / HOUR_PX) * 60;
+const clampMins = (m: number) => Math.max(0, Math.min(1440, m));
+const mskDayLabel = (d: Date) =>
+  d.toLocaleDateString('ru-RU', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 
+// ---- Props ----
 export type WeekGridProps = {
   events: NbEvent[];
   onCreate: (slot: { startUtc: string; endUtc: string; allDay?: boolean }) => void;
   onMoveOrResize: (patch: { id: string; startUtc?: string; endUtc?: string }) => void;
-  onSelect: (e: NbEvent) => void; // opens editor (double-click)
+  onSelect: (e: NbEvent) => void;         // open editor (edit mode)
+  onDelete: (id: string) => Promise<void>; // delete selected
 };
 
+// ---- Internal drag types ----
 type DragCreate = { kind: 'create'; dayUtc0: number; startMin: number; curMin: number };
 type DragMove = { kind: 'move'; dayUtc0: number; id: string; offsetMin: number; durMin: number };
 type DragResizeStart = { kind: 'resize-start'; dayUtc0: number; id: string; otherEndMin: number; curMin: number };
 type DragResizeEnd = { kind: 'resize-end'; dayUtc0: number; id: string; otherEndMin: number; curMin: number };
 type DragState = null | DragCreate | DragMove | DragResizeStart | DragResizeEnd;
 
-export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGridProps) {
+export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect, onDelete }: WeekGridProps) {
   const mondayUtc0 = useMemo(() => mondayUtcMidnightOfCurrentWeek(), []);
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const dayUtc0 = mondayUtc0 + i * DAY_MS;
@@ -66,7 +60,7 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
     return { i, dayUtc0, dayMsk, key };
   }), [mondayUtc0]);
 
-  // Index events per MSK day, and compute absolute positions
+  // Index events by MSK day
   const perDay = useMemo(() => {
     const map = new Map<number, Array<NbEvent & { top: number; height: number }>>();
     for (const d of days) map.set(d.dayUtc0, []);
@@ -75,63 +69,62 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
       const endMin = Math.max(startMin + MIN_SLOT_MIN, minutesSinceMskMidnight(e.endUtc));
       const top = minsToTop(startMin);
       const height = Math.max(minsToTop(endMin - startMin), minsToTop(MIN_SLOT_MIN));
-      const startUtcMs = new Date(e.startUtc).getTime();
-      const bucketUtc0 = mskMidnightUtcMs(startUtcMs);
+      const bucketUtc0 = mskMidnightUtcMs(new Date(e.startUtc).getTime());
       if (map.has(bucketUtc0)) map.get(bucketUtc0)!.push({ ...e, top, height });
     }
     return map;
   }, [events, days]);
 
-  // --- Selection + keyboard nudges ---
+  // Selection + keys
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => { containerRef.current?.focus(); }, []);
-
   function handleKeyDown(ev: React.KeyboardEvent<HTMLDivElement>) {
     if (!selectedId) return;
-    const plus = ev.key === '+' || ev.key === '=';
-    const minus = ev.key === '-' || ev.key === '_';
-    const enter = ev.key === 'Enter';
-    if (!plus && !minus && !enter) return;
-
     const evt = events.find(x => x.id === selectedId);
     if (!evt) return;
 
-    if (enter) {
+    if (ev.key === 'Enter') { ev.preventDefault(); onSelect(evt); return; }
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
       ev.preventDefault();
-      onSelect(evt);
+      if (confirm('Delete selected event?')) onDelete(selectedId);
       return;
     }
+    const plus = ev.key === '+' || ev.key === '=';
+    const minus = ev.key === '-' || ev.key === '_';
+    if (!plus && !minus) return;
 
     const delta = (plus ? +15 : -15) * 60000;
     ev.preventDefault();
-    const start = new Date(evt.startUtc).getTime() + delta;
-    const end   = new Date(evt.endUtc).getTime() + delta;
-    onMoveOrResize({ id: selectedId, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString() });
+    onMoveOrResize({
+      id: selectedId,
+      startUtc: new Date(new Date(evt.startUtc).getTime() + delta).toISOString(),
+      endUtc:   new Date(new Date(evt.endUtc).getTime()   + delta).toISOString(),
+    });
   }
 
-  // --- Drag state + handlers ---
+  // Drag state + scroll-aware math
   const [drag, setDrag] = useState<DragState>(null);
+  const dragMetaRef = useRef<{ colTop: number; scrollStart: number } | null>(null);
 
   useEffect(() => {
     function onMove(ev: MouseEvent) {
-      if (!drag || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const y = ev.clientY - rect.top - 32; // header offset
-      const curMin = clampMins(snapMin(topToMins(y)));
+      if (!drag || !containerRef.current || !dragMetaRef.current) return;
+      const { colTop, scrollStart } = dragMetaRef.current;
+      const yLocal = (ev.clientY - colTop) + (containerRef.current.scrollTop - scrollStart);
+      const curMin = clampMins(snapMin(topToMins(yLocal)));
 
       switch (drag.kind) {
         case 'create':
-          setDrag({ ...drag, curMin });
-          break;
         case 'resize-start':
         case 'resize-end':
           setDrag({ ...drag, curMin });
           break;
-        case 'move':
-          setDrag({ ...drag, offsetMin: clampMins(curMin - Math.round(drag.durMin / 2 / MIN_SLOT_MIN) * MIN_SLOT_MIN) });
+        case 'move': {
+          const centerSnap = Math.round(drag.durMin / 2 / MIN_SLOT_MIN) * MIN_SLOT_MIN;
+          setDrag({ ...drag, offsetMin: clampMins(curMin - centerSnap) });
           break;
+        }
       }
     }
     function onUp() {
@@ -139,31 +132,19 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
       if (drag.kind === 'create') {
         const a = Math.min(drag.startMin, drag.curMin);
         const b = Math.max(drag.startMin, drag.curMin);
-        if (b > a) {
-          const startUtc = new Date(drag.dayUtc0 + a * 60000).toISOString();
-          const endUtc = new Date(drag.dayUtc0 + b * 60000).toISOString();
-          onCreate({ startUtc, endUtc, allDay: false });
-        }
-      } else if (drag.kind === 'resize-start') {
+        if (b > a) onCreate({
+          startUtc: new Date(drag.dayUtc0 + a * 60000).toISOString(),
+          endUtc:   new Date(drag.dayUtc0 + b * 60000).toISOString(),
+          allDay: false
+        });
+      } else if (drag.kind === 'resize-start' || drag.kind === 'resize-end') {
         const a = Math.min(drag.curMin, drag.otherEndMin);
         const b = Math.max(drag.curMin, drag.otherEndMin);
-        if (b > a) {
-          onMoveOrResize({
-            id: drag.id,
-            startUtc: new Date(drag.dayUtc0 + a * 60000).toISOString(),
-            endUtc:   new Date(drag.dayUtc0 + b * 60000).toISOString()
-          });
-        }
-      } else if (drag.kind === 'resize-end') {
-        const a = Math.min(drag.curMin, drag.otherEndMin);
-        const b = Math.max(drag.curMin, drag.otherEndMin);
-        if (b > a) {
-          onMoveOrResize({
-            id: drag.id,
-            startUtc: new Date(drag.dayUtc0 + a * 60000).toISOString(),
-            endUtc:   new Date(drag.dayUtc0 + b * 60000).toISOString()
-          });
-        }
+        if (b > a) onMoveOrResize({
+          id: drag.id,
+          startUtc: new Date(drag.dayUtc0 + a * 60000).toISOString(),
+          endUtc:   new Date(drag.dayUtc0 + b * 60000).toISOString()
+        });
       } else if (drag.kind === 'move') {
         const startMin = snapMin(drag.offsetMin);
         const endMin = startMin + drag.durMin;
@@ -183,6 +164,21 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
     };
   }, [drag, onCreate, onMoveOrResize]);
 
+  // Current time line (MSK)
+  const [nowInfo, setNowInfo] = useState(() => ({
+    dayUtc0: mskMidnightUtcMs(Date.now()),
+    min: minutesSinceMskMidnight(new Date().toISOString()),
+  }));
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowInfo({
+        dayUtc0: mskMidnightUtcMs(Date.now()),
+        min: minutesSinceMskMidnight(new Date().toISOString()),
+      });
+    }, 30000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="h-full w-full flex flex-col">
       <div className="px-2 py-1 border-b flex items-center gap-2">
@@ -196,7 +192,7 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
           + Quick add (1h now)
         </button>
         <span className="text-xs text-zinc-400">
-          Drag: create • Drag block: move • Resize: edges • snap 15m • Keys: <span className="font-mono">+</span>/<span className="font-mono">-</span> nudge, <span className="font-mono">Enter</span> edit
+          Drag: create • Drag block: move • Resize: edges • snap 15m • Keys: <span className="font-mono">+</span>/<span className="font-mono">-</span> nudge, <span className="font-mono">Enter</span> edit, <span className="font-mono">Del</span> delete
         </span>
       </div>
 
@@ -207,8 +203,14 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
         role="application"
         onKeyDown={handleKeyDown}
       >
-        {/* One row, 7 columns; each column is a 24h track */}
-        <div className="grid grid-cols-7 gap-2" style={{ minWidth: GRID_MIN_W }}>
+        {/* 7 columns with min widths; horizontal scroll appears on small screens */}
+        <div
+          className="grid gap-2"
+          style={{
+            minWidth: GRID_MIN_W,
+            gridTemplateColumns: 'repeat(7, minmax(140px, 1fr))',
+          }}
+        >
           {days.map(({ i, dayUtc0, dayMsk }) => {
             const dayLabel = mskDayLabel(dayMsk);
             const list = perDay.get(dayUtc0) ?? [];
@@ -220,12 +222,17 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
 
                 {/* Time track */}
                 <div
-                  className="relative select-none"
+                  className="relative select-none nb-day-track"
                   style={{ height: HOUR_PX * 24 }}
                   onMouseDown={(ev) => {
-                    const colRect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-                    const y = ev.clientY - colRect.top;
-                    const startMin = clampMins(snapMin(topToMins(y)));
+                    const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    dragMetaRef.current = {
+                      colTop: rect.top,
+                      scrollStart: containerRef.current?.scrollTop ?? 0
+                    };
+                    const yLocal = (ev.clientY - rect.top)
+                      + ((containerRef.current?.scrollTop ?? 0) - dragMetaRef.current.scrollStart);
+                    const startMin = clampMins(snapMin(topToMins(yLocal)));
                     setDrag({ kind: 'create', dayUtc0, startMin, curMin: startMin });
                   }}
                 >
@@ -233,14 +240,23 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                   {Array.from({ length: 24 }, (_, h) => (
                     <div
                       key={h}
-                      className={`absolute left-5 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
+                      className={`absolute left-0 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
                       style={{ top: h * HOUR_PX }}
                     >
-                      <div className="absolute -left-4 -top-2 text-[10px] text-zinc-500 select-none">{h}:00</div>
+                      <div className="absolute left-6 -top-2 px-1 text-[10px] text-zinc-400 bg-zinc-900/90 select-none">
+                        {h}:00
+                      </div>
                     </div>
                   ))}
 
-                  {/* existing events (within this day) */}
+                  {/* current time line */}
+                  {dayUtc0 === nowInfo.dayUtc0 && nowInfo.min >= 0 && nowInfo.min <= 1440 && (
+                    <div className="absolute left-0 right-0 h-[2px] bg-red-500" style={{ top: minsToTop(nowInfo.min) }}>
+                      <div className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-red-500" />
+                    </div>
+                  )}
+
+                  {/* events */}
                   {list.map(e => {
                     const startMin = minutesSinceMskMidnight(e.startUtc);
                     const endMin = Math.max(startMin + MIN_SLOT_MIN, minutesSinceMskMidnight(e.endUtc));
@@ -257,15 +273,21 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                           : 'border-zinc-600 bg-zinc-800/90 hover:bg-zinc-700/90'
                         }`}
                         style={{ top, height }}
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          if (e.id) setSelectedId(e.id);
-                        }}
+                        onClick={(ev) => { ev.stopPropagation(); if (e.id) setSelectedId(e.id); }}
                         onMouseDown={(ev) => {
-                          const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-                          const y = ev.clientY - rect.top;
-                          const isTopHandle = y < 6;
-                          const isBottomHandle = y > rect.height - 6;
+                          // Use the day track rect, not the event rect (scroll-correct)
+                          const track = (ev.currentTarget as HTMLElement).closest('.nb-day-track') as HTMLDivElement;
+                          const rect = track.getBoundingClientRect();
+                          dragMetaRef.current = {
+                            colTop: rect.top,
+                            scrollStart: containerRef.current?.scrollTop ?? 0
+                          };
+
+                          const evRect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
+                          const yInEvent = ev.clientY - evRect.top;
+                          const isTopHandle = yInEvent < 6;
+                          const isBottomHandle = yInEvent > evRect.height - 6;
+
                           if (e.id) {
                             if (isTopHandle) {
                               setDrag({ kind: 'resize-start', dayUtc0, id: e.id, otherEndMin: endMin, curMin: startMin });
@@ -278,24 +300,20 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                           }
                         }}
                         onDoubleClick={() => onSelect(e)}
-                        title="Click to select • Drag to move • Resize edges • Double-click to edit • Keys: +/- nudge, Enter edit"
+                        title="Click to select • Drag to move • Resize edges • Double-click to edit • +/- nudge • Enter edit • Del delete"
                       >
-                        {/* resize handles */}
                         <div className="absolute left-0 right-0 h-1 top-0 cursor-n-resize bg-transparent" />
                         <div className="absolute left-0 right-0 h-1 bottom-0 cursor-s-resize bg-transparent" />
-                        {/* label */}
                         <div className="px-1 py-0.5">
                           <div className="font-medium truncate">{e.title || '(no title)'}</div>
-                          <div className="text-zinc-300">
-                            {fmtTime(e.startUtc)}–{fmtTime(e.endUtc)} MSK
-                          </div>
+                          <div className="text-zinc-300">{fmtTime(e.startUtc)}–{fmtTime(e.endUtc)} MSK</div>
                         </div>
                       </div>
                     );
                   })}
 
-                  {/* create / resize draft overlay */}
-                  {drag && (drag.kind === 'create' || drag.kind === 'resize-start' || drag.kind === 'resize-end') && (() => {
+                  {/* create/resize draft (only in active column) */}
+                  {drag && (drag.kind === 'create' || drag.kind === 'resize-start' || drag.kind === 'resize-end') && drag.dayUtc0 === dayUtc0 && (() => {
                     const a = drag.kind === 'create'
                       ? Math.min(drag.startMin, drag.curMin)
                       : Math.min(drag.curMin, drag.otherEndMin);
@@ -304,24 +322,14 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                       : Math.max(drag.curMin, drag.otherEndMin);
                     const top = minsToTop(a);
                     const height = Math.max(minsToTop(b - a), minsToTop(MIN_SLOT_MIN));
-                    return (
-                      <div
-                        className="absolute left-1 right-1 rounded border border-emerald-500/70 bg-emerald-500/20 pointer-events-none"
-                        style={{ top, height }}
-                      />
-                    );
+                    return <div className="absolute left-1 right-1 rounded border border-emerald-500/70 bg-emerald-500/20 pointer-events-none" style={{ top, height }} />;
                   })()}
 
-                  {/* move draft overlay */}
-                  {drag && drag.kind === 'move' && (() => {
+                  {/* move draft (only in active column) */}
+                  {drag && drag.kind === 'move' && drag.dayUtc0 === dayUtc0 && (() => {
                     const top = minsToTop(clampMins(snapMin(drag.offsetMin)));
                     const height = minsToTop(drag.durMin);
-                    return (
-                      <div
-                        className="absolute left-1 right-1 rounded border border-sky-500/70 bg-sky-500/20 pointer-events-none"
-                        style={{ top, height }}
-                      />
-                    );
+                    return <div className="absolute left-1 right-1 rounded border border-sky-500/70 bg-sky-500/20 pointer-events-none" style={{ top, height }} />;
                   })()}
                 </div>
               </div>

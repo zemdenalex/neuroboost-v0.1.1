@@ -180,21 +180,38 @@ app.post('/events', async (req, res) => {
 // Move/resize (UTC ISO fields)
 app.patch('/events/:id', async (req, res) => {
   try {
-    const { startsAt, endsAt, rrule } = req.body || {};
-    if (!startsAt && !endsAt && !rrule) return res.status(400).json({ error: 'nothing to update' });
-    const ev = await prisma.event.update({
-      where: { id: req.params.id },
-      data: {
-        ...(startsAt ? { startsAt: new Date(startsAt) } : {}),
-        ...(endsAt ? { endsAt: new Date(endsAt) } : {}),
-        ...(rrule !== undefined ? { rrule } : {})
-      }
-    });
+    const { startsAt, endsAt, rrule, title } = req.body || {};
+    if (!startsAt && !endsAt && rrule === undefined && title === undefined) {
+      return res.status(400).json({ error: 'nothing to update' });
+    }
+    const data = {};
+    if (startsAt) data.startsAt = new Date(startsAt);
+    if (endsAt) data.endsAt = new Date(endsAt);
+    if (rrule !== undefined) data.rrule = rrule;
+    if (title !== undefined) data.title = String(title);
+
+    const ev = await prisma.event.update({ where: { id: req.params.id }, data });
     res.json({ ok: true, id: ev.id });
   } catch (e) {
     res.status(400).json({ error: String(e) });
   }
 });
+
+// Delete event (simple cascade)
+app.delete('/events/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    // best-effort cascading deletes
+    await prisma.reflection.deleteMany({ where: { eventId: id } }).catch(() => {});
+    await prisma.eventException.deleteMany({ where: { eventId: id } }).catch(() => {});
+    await prisma.reminder.deleteMany({ where: { eventId: id } }).catch(() => {});
+    await prisma.event.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: String(e) });
+  }
+});
+
 
 // Reflection
 app.post('/events/:id/reflection', async (req, res) => {
