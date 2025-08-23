@@ -11,12 +11,26 @@ export default function App() {
   const [events, setEvents] = useState<NbEvent[]>([]);
   const [range, setRange] = useState<Range>(null);
 
-  async function refresh() {
-    const r = await fetch('/events');
-    if (!r.ok) throw new Error('Failed to load events');
-    setEvents(await r.json());
-  }
-  useEffect(() => { refresh(); }, []);
+  function weekRangeUtc(): { from: string; to: string } {
+  // Monday 00:00 MSK -> convert to UTC; then +7 days
+  const nowUtcMs = Date.now();
+  const nowMsk = new Date(nowUtcMs + 3 * 60 * 60 * 1000);
+  const mondayIndex = (nowMsk.getUTCDay() + 6) % 7;
+  const todayMskMidnight = new Date(nowMsk);
+  todayMskMidnight.setUTCHours(0, 0, 0, 0);
+  const mondayMskMidnightMs = todayMskMidnight.getTime() - mondayIndex * 24 * 60 * 60 * 1000;
+  const mondayUtc0 = mondayMskMidnightMs - 3 * 60 * 60 * 1000;
+  const nextMondayUtc0 = mondayUtc0 + 7 * 24 * 60 * 60 * 1000;
+  return { from: new Date(mondayUtc0).toISOString(), to: new Date(nextMondayUtc0).toISOString() };
+}
+
+async function refresh() {
+  const { from, to } = weekRangeUtc();
+  const r = await fetch(`/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  if (!r.ok) throw new Error('Failed to load events');
+  setEvents(await r.json());
+}
+
 
   function onCreate(slot: { startUtc: string; endUtc: string; allDay?: boolean }) {
     setRange({ start: new Date(slot.startUtc), end: new Date(slot.endUtc) });
