@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import type { NbEvent } from '../types';
-import { createEventUTC } from '../api';
+import { createEventUTC, patchEventUTC } from '../api';
 
 type Range = { start: Date; end: Date } | null;
 
 export function Editor(props: {
-  range: Range;                 // for creation
-  draft?: NbEvent | null;       // for edit (optional)
+  range: Range;
+  draft?: NbEvent | null;
   onClose: () => void;
   onCreated: () => void;
   onPatched?: () => void;
@@ -29,26 +29,20 @@ export function Editor(props: {
     if (!t) return;
 
     if (isEdit && draft?.id) {
-      await fetch(`/events/${draft.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: t,
-          rrule: weekly ? `FREQ=WEEKLY;COUNT=${count}` : null
-        })
+      await patchEventUTC(draft.id, {
+        title: t,
+        rrule: weekly ? `FREQ=WEEKLY;COUNT=${count}` : null,
       });
       onPatched?.();
       onClose();
       return;
     }
-
     await createEventUTC({
       title: t,
       startsAt: startISO,
       endsAt: endISO,
       allDay: false,
       rrule: weekly ? `FREQ=WEEKLY;COUNT=${count}` : null,
-      tz: 'Europe/Moscow'
     });
     onCreated();
     onClose();
@@ -77,10 +71,7 @@ export function Editor(props: {
           <label className="flex items-center gap-2 text-sm">
             Count:
             <input
-              type="number"
-              min={1}
-              max={52}
-              value={count}
+              type="number" min={1} max={52} value={count}
               onChange={e=>setCount(parseInt(e.target.value || '1', 10))}
               className="w-16 border rounded px-1 py-0.5 text-black"
             />
@@ -88,7 +79,9 @@ export function Editor(props: {
         )}
         <div className="flex justify-end gap-2">
           <button className="px-3 py-1 rounded border" onClick={onClose}>Cancel</button>
-          <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={submit}>{isEdit ? 'Save' : 'Create'}</button>
+          <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={submit}>
+            {isEdit ? 'Save' : 'Create'}
+          </button>
         </div>
       </div>
     </div>

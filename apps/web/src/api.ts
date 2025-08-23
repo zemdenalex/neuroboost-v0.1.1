@@ -1,29 +1,52 @@
-const API = "http://localhost:3001";
-export type EventOcc = {
-  id: string; masterId: string; title: string; allDay: boolean; rrule: string | null;
-  startsAt: string; endsAt: string; // UTC ISO
+import type { NbEvent } from './types';
+
+export const API_BASE =
+  (import.meta.env?.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
+  'http://localhost:3001';
+
+export type CreateEventBody = {
+  title: string;
+  startsAt: string; // UTC ISO
+  endsAt: string;   // UTC ISO
+  allDay?: boolean;
+  rrule?: string | null;
 };
 
-export const msFromMsk = (d: Date) => d.getTime() - 3 * 3600_000;
-export const msToMsk = (d: Date) => d.getTime() + 3 * 3600_000;
-export const toUTCISOFromMsk = (y: number,m: number,day: number,h: number,min: number) => {
-  const local = new Date(Date.UTC(y, m, day, h-3, min)); // subtract +03
-  return local.toISOString();
-};
+export async function getEvents(startISO: string, endISO: string): Promise<NbEvent[]> {
+  const r = await fetch(`${API_BASE}/events?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}`);
+  if (!r.ok) throw new Error('Failed to load events');
+  const raw = await r.json();
+  return raw.map((o: any) => ({
+    id: o.id,
+    title: o.title,
+    startUtc: o.startsAt,
+    endUtc: o.endsAt,
+    allDay: !!o.allDay,
+    masterId: o.masterId ?? null,
+    rrule: o.rrule ?? null,
+  })) as NbEvent[];
+}
 
-export async function fetchEvents(startUTCISO: string, endUTCISO: string): Promise<EventOcc[]> {
-  const url = `${API}/events?start=${encodeURIComponent(startUTCISO)}&end=${encodeURIComponent(endUTCISO)}`;
-  const r = await fetch(url); if (!r.ok) throw new Error(await r.text()); return r.json();
+export async function createEventUTC(body: CreateEventBody): Promise<{ id: string }> {
+  const r = await fetch(`${API_BASE}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error('Failed to create');
+  return r.json();
 }
-export async function createEventUTC(body: {title:string; startsAt:string; endsAt:string; allDay?:boolean; rrule?:string|null}) {
-  const r = await fetch(`${API}/events`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(await r.text()); return r.json();
+
+export async function patchEventUTC(id: string, patch: Partial<CreateEventBody> & { title?: string }): Promise<void> {
+  const r = await fetch(`${API_BASE}/events/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error('Failed to patch');
 }
-export async function patchEventUTC(id:string, body: Partial<{startsAt:string; endsAt:string; rrule:string|null}>) {
-  const r = await fetch(`${API}/events/${id}`, { method: 'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(await r.text()); return r.json();
-}
-export async function statsWeek(startISODate: string) {
-  const r = await fetch(`${API}/stats/week?start=${encodeURIComponent(startISODate)}`);
-  if (!r.ok) throw new Error(await r.text()); return r.json();
+
+export async function deleteEvent(id: string): Promise<void> {
+  const r = await fetch(`${API_BASE}/events/${id}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error('Failed to delete');
 }

@@ -95,9 +95,18 @@ app.listen(PORT, () => {
   console.log(`@nb/api listening on http://localhost:${PORT}`);
 });
 
+// old:
+// app.use(cors({ origin: 'http://localhost:5173' }));
 
-// after app.use(express.json());
-app.use(cors({ origin: 'http://localhost:5173' }));
+// new: allow vite 5173–5179 (and no-origin like curl)
+const allow = [/^http:\/\/localhost:51\d{2}$/];
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    cb(null, allow.some(rx => rx.test(origin)));
+  }
+}));
+
 
 // ---- helpers ----
 function toDate(v) { const d = new Date(v); if (isNaN(d)) throw new Error('Bad date'); return d; }
