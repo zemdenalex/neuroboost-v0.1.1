@@ -4,7 +4,7 @@ import type { NbEvent } from '../types';
 // --- Time constants (MSK UI; UTC storage) ---
 const MSK_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+03:00
 const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_PX = 48;           // visual scale: 24h * 48px = 1152px tall
+const HOUR_PX = 48;           // 24h * 48px = 1152px tall
 const MIN_SLOT_MIN = 15;      // snap to 15 minutes
 const GRID_MIN_W = 1680;      // keep 7 columns readable on narrow screens
 
@@ -12,7 +12,7 @@ const GRID_MIN_W = 1680;      // keep 7 columns readable on narrow screens
 function mondayUtcMidnightOfCurrentWeek(): number {
   const nowUtcMs = Date.now();
   const nowMsk = new Date(nowUtcMs + MSK_OFFSET_MS);
-  const mondayIndex = (nowMsk.getUTCDay() + 6) % 7; // Monday=0..Sunday=6
+  const mondayIndex = (nowMsk.getUTCDay() + 6) % 7; // Mon=0..Sun=6
   const todayMskMidnight = new Date(nowMsk);
   todayMskMidnight.setUTCHours(0, 0, 0, 0);
   const mondayMskMidnightMs = todayMskMidnight.getTime() - mondayIndex * DAY_MS;
@@ -48,7 +48,7 @@ export type WeekGridProps = {
   events: NbEvent[];
   onCreate: (slot: { startUtc: string; endUtc: string; allDay?: boolean }) => void;
   onMoveOrResize: (patch: { id: string; startUtc?: string; endUtc?: string }) => void;
-  onSelect: (e: NbEvent) => void;
+  onSelect: (e: NbEvent) => void; // opens editor (double-click)
 };
 
 type DragCreate = { kind: 'create'; dayUtc0: number; startMin: number; curMin: number };
@@ -82,9 +82,37 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
     return map;
   }, [events, days]);
 
+  // --- Selection + keyboard nudges ---
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { containerRef.current?.focus(); }, []);
+
+  function handleKeyDown(ev: React.KeyboardEvent<HTMLDivElement>) {
+    if (!selectedId) return;
+    const plus = ev.key === '+' || ev.key === '=';
+    const minus = ev.key === '-' || ev.key === '_';
+    const enter = ev.key === 'Enter';
+    if (!plus && !minus && !enter) return;
+
+    const evt = events.find(x => x.id === selectedId);
+    if (!evt) return;
+
+    if (enter) {
+      ev.preventDefault();
+      onSelect(evt);
+      return;
+    }
+
+    const delta = (plus ? +15 : -15) * 60000;
+    ev.preventDefault();
+    const start = new Date(evt.startUtc).getTime() + delta;
+    const end   = new Date(evt.endUtc).getTime() + delta;
+    onMoveOrResize({ id: selectedId, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString() });
+  }
+
   // --- Drag state + handlers ---
   const [drag, setDrag] = useState<DragState>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onMove(ev: MouseEvent) {
@@ -167,10 +195,18 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
         >
           + Quick add (1h now)
         </button>
-        <span className="text-xs text-zinc-400">Drag: create • Drag block: move • Resize: handles • snap 15m • MSK</span>
+        <span className="text-xs text-zinc-400">
+          Drag: create • Drag block: move • Resize: edges • snap 15m • Keys: <span className="font-mono">+</span>/<span className="font-mono">-</span> nudge, <span className="font-mono">Enter</span> edit
+        </span>
       </div>
 
-      <div className="flex-1 overflow-x-auto overflow-y-auto p-2" ref={containerRef}>
+      <div
+        className="flex-1 overflow-x-auto overflow-y-auto p-2 outline-none"
+        ref={containerRef}
+        tabIndex={0}
+        role="application"
+        onKeyDown={handleKeyDown}
+      >
         {/* One row, 7 columns; each column is a 24h track */}
         <div className="grid grid-cols-7 gap-2" style={{ minWidth: GRID_MIN_W }}>
           {days.map(({ i, dayUtc0, dayMsk }) => {
@@ -195,11 +231,12 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                 >
                   {/* hour lines */}
                   {Array.from({ length: 24 }, (_, h) => (
-                    <div key={h}
-                      className={`absolute left-6 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
+                    <div
+                      key={h}
+                      className={`absolute left-5 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
                       style={{ top: h * HOUR_PX }}
                     >
-                      <div className="absolute -left-5 -top-2 text-[10px] text-zinc-500 select-none">{h}:00</div>
+                      <div className="absolute -left-4 -top-2 text-[10px] text-zinc-500 select-none">{h}:00</div>
                     </div>
                   ))}
 
@@ -210,11 +247,20 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                     const top = minsToTop(startMin);
                     const height = Math.max(minsToTop(endMin - startMin), minsToTop(MIN_SLOT_MIN));
                     const durMin = endMin - startMin;
+                    const selected = selectedId && e.id === selectedId;
+
                     return (
                       <div
                         key={(e.id ?? '') + e.startUtc}
-                        className="absolute left-1 right-1 rounded border border-zinc-600 bg-zinc-800/90 hover:bg-zinc-700/90 text-xs"
+                        className={`absolute left-1 right-1 rounded border text-xs ${selected
+                          ? 'border-blue-400 ring-2 ring-blue-400 bg-zinc-700/90'
+                          : 'border-zinc-600 bg-zinc-800/90 hover:bg-zinc-700/90'
+                        }`}
                         style={{ top, height }}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          if (e.id) setSelectedId(e.id);
+                        }}
                         onMouseDown={(ev) => {
                           const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
                           const y = ev.clientY - rect.top;
@@ -232,7 +278,7 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                           }
                         }}
                         onDoubleClick={() => onSelect(e)}
-                        title="Drag to move; resize handles; double-click to edit"
+                        title="Click to select • Drag to move • Resize edges • Double-click to edit • Keys: +/- nudge, Enter edit"
                       >
                         {/* resize handles */}
                         <div className="absolute left-0 right-0 h-1 top-0 cursor-n-resize bg-transparent" />
