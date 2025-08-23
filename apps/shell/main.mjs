@@ -1,5 +1,6 @@
 // apps/shell/main.mjs  — ESM, no duplicate identifiers
 import { app, BrowserWindow, Tray, Menu, globalShortcut } from 'electron';
+import { startScheduler } from './scheduler.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -61,3 +62,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+
+// start only if route is "shell" (default still "telegram-stub")
+const route = process.env.NB_ROUTE_PRIMARY || 'telegram-stub';
+if (route === 'shell') {
+  try {
+    startScheduler();
+    console.log('[shell] scheduler started (T-5/T-1, dedupe 120s)');
+  } catch (e) {
+    console.warn('[shell] scheduler failed:', e?.message || e);
+  }
+}

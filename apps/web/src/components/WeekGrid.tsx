@@ -196,10 +196,10 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                   {/* hour lines */}
                   {Array.from({ length: 24 }, (_, h) => (
                     <div key={h}
-                      className={`absolute left-0 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
+                      className={`absolute left-6 right-0 border-t ${h % 3 === 0 ? 'border-zinc-700' : 'border-zinc-800'}`}
                       style={{ top: h * HOUR_PX }}
                     >
-                      <div className="absolute -left-2 -top-2 text-[10px] text-zinc-500 select-none">{h}:00</div>
+                      <div className="absolute -left-5 -top-2 text-[10px] text-zinc-500 select-none">{h}:00</div>
                     </div>
                   ))}
 
