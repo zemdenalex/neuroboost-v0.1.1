@@ -8,8 +8,6 @@ export type WeekGridProps = {
   onSelect: (e: NbEvent) => void;
 };
 
-// Minimal presentational grid (no direct API calls; no imports from ../api).
-// Renders a simple week-like list; click "Add" creates a 1h slot starting now (UTC).
 export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGridProps) {
   function addNow() {
     const start = new Date();
@@ -30,25 +28,18 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
       </div>
 
       <div className="flex-1 overflow-auto p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-        {/* Simple grouping by day (UTC) */}
         {[...Array(7)].map((_, i) => {
           const day = new Date();
-          day.setUTCDate(day.getUTCDate() - day.getUTCDay() + i); // start week Sun
+          day.setUTCDate(day.getUTCDate() - day.getUTCDay() + i);
           day.setUTCHours(0, 0, 0, 0);
           const dayStr = day.toISOString().slice(0, 10);
-
           const dayEvents = events.filter(e => e.startUtc.slice(0, 10) === dayStr);
 
           return (
             <div key={i} className="border border-zinc-700 rounded p-2">
-              <div className="text-xs mb-2 text-zinc-400">
-                {day.toUTCString().slice(0, 16)}
-              </div>
-
+              <div className="text-xs mb-2 text-zinc-400">{day.toUTCString().slice(0, 16)}</div>
               <div className="flex flex-col gap-2">
-                {dayEvents.length === 0 && (
-                  <div className="text-xs text-zinc-500">—</div>
-                )}
+                {dayEvents.length === 0 && <div className="text-xs text-zinc-500">—</div>}
                 {dayEvents.map(e => {
                   const t = new Date(e.startUtc).toUTCString().slice(17, 22) + '–' + new Date(e.endUtc).toUTCString().slice(17, 22);
                   return (
@@ -62,7 +53,7 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                       <div className="text-zinc-400">{t} UTC</div>
                       {e.allDay && <div className="text-amber-400">all-day</div>}
                       {e.id && (
-                        <div className="mt-1 flex gap-2">
+                        <div className="mt-1">
                           <button
                             type="button"
                             className="px-1 py-0.5 rounded bg-zinc-900 border border-zinc-700 hover:bg-zinc-600"
@@ -70,7 +61,6 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect }: WeekGri
                               ev.stopPropagation();
                               const start = new Date(e.startUtc);
                               const end = new Date(e.endUtc);
-                              // Move by +15m as a demo move
                               onMoveOrResize({
                                 id: e.id!,
                                 startUtc: new Date(start.getTime() + 15 * 60 * 1000).toISOString(),

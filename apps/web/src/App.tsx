@@ -1,26 +1,25 @@
 import { useEffect, useState } from 'react';
-import { WeekGrid } from './components/WeekGrid'; // named export
-import { Editor } from './components/Editor';      // named export
+import { WeekGrid } from './components/WeekGrid';
+import { Editor } from './components/Editor';   // named export
 import NudgeBadge from './components/NudgeBadge';
 import type { NbEvent } from './types';
+
 type Range = { start: Date; end: Date } | null;
 
 export default function App() {
   const [events, setEvents] = useState<NbEvent[]>([]);
   const [range, setRange] = useState<Range>(null);
-  
+
   async function refresh() {
     const r = await fetch('/events');
     if (!r.ok) throw new Error('Failed to load events');
     setEvents(await r.json());
   }
-
   useEffect(() => { refresh(); }, []);
 
   function onCreate(slot: { startUtc: string; endUtc: string; allDay?: boolean }) {
     setRange({ start: new Date(slot.startUtc), end: new Date(slot.endUtc) });
   }
-
   async function onMoveOrResize(patch: { id: string; startUtc?: string; endUtc?: string }) {
     const r = await fetch(`/events/${patch.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -29,7 +28,6 @@ export default function App() {
     if (!r.ok) throw new Error('Failed to move/resize');
     refresh();
   }
-
   function onSelect(e: NbEvent) {
     setRange({ start: new Date(e.startUtc), end: new Date(e.endUtc) });
   }

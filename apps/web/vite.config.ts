@@ -6,13 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // API on :3001
-      '/health': 'http://localhost:3001',
-      '/events': 'http://localhost:3001',
-      '/stats': 'http://localhost:3001',
-      '/status': 'http://localhost:3001',  // /status/nudges
-      '/notify': 'http://localhost:3001',  // /notify/test
-      '/export': 'http://localhost:3001'
+      '/health':  'http://localhost:3001',
+      '/events':  'http://localhost:3001',
+      '/stats':   'http://localhost:3001',
+      '/status':  'http://localhost:3001',  // /status/nudges
+      '/notify':  'http://localhost:3001',  // /notify/test
+      '/export':  'http://localhost:3001'
     }
   }
 })

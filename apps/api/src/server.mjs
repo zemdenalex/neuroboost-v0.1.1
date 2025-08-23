@@ -1,5 +1,11 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import cors from 'cors';
+import rrulePkg from 'rrule';
+const { RRule } = rrulePkg;
+import path from 'node:path';
+import fs from 'node:fs/promises'; // not used to write; only to check existence if asked later
+import { DateTime } from 'luxon';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -18,8 +24,6 @@ app.get('/health', async (_req, res) => {
 // Minimal dry-run exporter endpoint
 // Query ?vault=/absolute/path/to/your/ObsidianVault  (optional)
 // ALWAYS confines to NeuroBoost/; NEVER writes.
-import path from 'node:path';
-import fs from 'node:fs/promises'; // not used to write; only to check existence if asked later
 
 function confineToNeuroBoost(vaultPathAbs) {
   const root = path.resolve(vaultPathAbs ?? process.cwd());
@@ -91,10 +95,6 @@ app.listen(PORT, () => {
   console.log(`@nb/api listening on http://localhost:${PORT}`);
 });
 
-// TOP: add imports
-import cors from 'cors';
-import rrulePkg from 'rrule';
-const { RRule } = rrulePkg;
 
 // after app.use(express.json());
 app.use(cors({ origin: 'http://localhost:5173' }));
@@ -237,7 +237,6 @@ app.get('/stats/week', async (req, res) => {
   }
 });
 
-import { DateTime } from 'luxon';
 
 // Next Sunday 18:00 Europe/Moscow
 function nextWeeklyPlannerISO() {
@@ -271,4 +270,58 @@ app.post('/notify/test', (_req, res) => {
       ? 'Telegram route present but disabled (stub); no sends performed.'
       : 'No-op test only; sending is disabled in this build.',
   });
+});
+
+// --- helper: fallback calculator if Luxon fails ---
+function nextWeeklyPlannerFallbackUtcIso() {
+  const MSK_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+03:00 year-round
+  const nowUtc = new Date();
+  const nowMsk = new Date(nowUtc.getTime() + MSK_OFFSET_MS);
+
+  const weekday = nowMsk.getUTCDay(); // 0..6, Sunday=0
+  const daysUntilSunday = (7 - weekday) % 7;
+  let targetMsk = new Date(nowMsk.getTime() + daysUntilSunday * 86400000);
+  targetMsk.setUTCHours(18, 0, 0, 0);
+  if (targetMsk <= nowMsk) targetMsk = new Date(targetMsk.getTime() + 7 * 86400000);
+
+  const targetUtc = new Date(targetMsk.getTime() - MSK_OFFSET_MS);
+  return {
+    weeklyPlannerLocal: new Date(targetUtc.getTime() + MSK_OFFSET_MS).toISOString().replace('Z', '+03:00'),
+    weeklyPlannerUtc: targetUtc.toISOString()
+  };
+}
+
+app.get('/status/nudges', (_req, res) => {
+  try {
+    const routePrimary = process.env.NB_ROUTE_PRIMARY || 'telegram-stub';
+    const dedupeWindowSec = 120;
+
+    let weeklyPlannerLocal, weeklyPlannerUtc;
+    try {
+      const zone = 'Europe/Moscow';
+      const now = DateTime.now().setZone(zone);
+      const daysUntilSunday = (7 - now.weekday) % 7; // ISO weekday 1..7
+      let dt = now.plus({ days: daysUntilSunday }).set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+      if (dt <= now) dt = dt.plus({ weeks: 1 });
+      weeklyPlannerLocal = dt.toISO();      // includes +03:00
+      weeklyPlannerUtc   = dt.toUTC().toISO();
+    } catch {
+      const fb = nextWeeklyPlannerFallbackUtcIso();
+      weeklyPlannerLocal = fb.weeklyPlannerLocal;
+      weeklyPlannerUtc   = fb.weeklyPlannerUtc;
+    }
+
+    res.json({ ok: true, routePrimary, dedupeWindowSec, weeklyPlannerLocal, weeklyPlannerUtc });
+  } catch (err) {
+    console.error('[status/nudges] unexpected error:', err);
+    const fb = nextWeeklyPlannerFallbackUtcIso();
+    res.status(200).json({
+      ok: false,
+      routePrimary: process.env.NB_ROUTE_PRIMARY || 'telegram-stub',
+      dedupeWindowSec: 120,
+      weeklyPlannerLocal: fb.weeklyPlannerLocal,
+      weeklyPlannerUtc: fb.weeklyPlannerUtc,
+      error: 'status-compute-failed'
+    });
+  }
 });
