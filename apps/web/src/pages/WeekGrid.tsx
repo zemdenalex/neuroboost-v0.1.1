@@ -9,6 +9,62 @@ const MIN_SLOT_MIN = 15;      // snap to 15 minutes
 const GRID_MIN_W = 1200;      // allow tighter columns on laptops
 
 // --- Helpers ---
+type EvLite = { id?: string; startUtc: string; endUtc: string };
+const evKey = (e: EvLite) => `${e.id ?? ''}${e.startUtc}`;
+function startMin(e: EvLite) { return minutesSinceMskMidnight(e.startUtc); }
+function endMin(e: EvLite) { return Math.max(startMin(e) + MIN_SLOT_MIN, minutesSinceMskMidnight(e.endUtc)); }
+
+function computeOverlapLayout(list: EvLite[], minutesSinceMskMidnight: (iso: string) => number) {
+  type Node = { e: EvLite; s: number; en: number; dur: number; key: string };
+  const nodes: Node[] = list.map(e => {
+    const s = minutesSinceMskMidnight(e.startUtc);
+    const en = Math.max(s + MIN_SLOT_MIN, minutesSinceMskMidnight(e.endUtc));
+    return { e, s, en, dur: en - s, key: evKey(e) };
+  }).sort((a,b) => a.s - b.s || a.en - b.en);
+
+  const layout = new Map<string, { left: number; right: number; z: number }>();
+  const L = 4;                 // base left padding (px)
+  const R = 4;                 // base right padding (px)
+  const STEP = 12;             // inset step for shorter events (px)
+  const CLAMP = 4;             // max number of visible inset steps
+
+  let cluster: Node[] = [];
+  let clusterMaxEnd = -1;
+
+  const flush = () => {
+    if (!cluster.length) return;
+    const maxDur = Math.max(...cluster.map(x => x.dur));
+    const bases = cluster.filter(x => x.dur === maxDur);
+    const others = cluster.filter(x => x.dur !== maxDur)
+      .sort((a,b) => a.dur - b.dur || a.s - b.s); // shortest first (draw on top)
+
+    // Longest event(s): full width (near full column), behind others
+    for (const n of bases) layout.set(n.key, { left: L, right: R, z: 10 });
+
+    // Shorter overlaps: shift right and draw above
+    let i = 0;
+    for (const n of others) {
+      const step = Math.min(++i, CLAMP);
+      layout.set(n.key, { left: L + step * STEP, right: R, z: 20 + step });
+    }
+
+    cluster = []; clusterMaxEnd = -1;
+  };
+
+  for (const n of nodes) {
+    if (!cluster.length || n.s < clusterMaxEnd) {
+      cluster.push(n);
+      clusterMaxEnd = Math.max(clusterMaxEnd, n.en);
+    } else {
+      flush();
+      cluster.push(n);
+      clusterMaxEnd = n.en;
+    }
+  }
+  flush();
+  return layout;
+}
+
 function mondayUtcMidnightOfCurrentWeek(): number {
   const nowUtcMs = Date.now();
   const nowMsk = new Date(nowUtcMs + MSK_OFFSET_MS);
@@ -18,16 +74,19 @@ function mondayUtcMidnightOfCurrentWeek(): number {
   const mondayMskMidnightMs = todayMskMidnight.getTime() - mondayIndex * DAY_MS;
   return mondayMskMidnightMs - MSK_OFFSET_MS; // back to UTC midnight
 }
+
 function mskMidnightUtcMs(utcMs: number): number {
   const msk = new Date(utcMs + MSK_OFFSET_MS);
   msk.setUTCHours(0, 0, 0, 0);
   return msk.getTime() - MSK_OFFSET_MS;
 }
+
 function minutesSinceMskMidnight(utcISO: string): number {
   const utcMs = new Date(utcISO).getTime();
   const baseUtc = mskMidnightUtcMs(utcMs);
   return Math.max(0, Math.min(1440, Math.round((utcMs - baseUtc) / 60000)));
 }
+
 const snapMin = (m: number) => Math.round(m / MIN_SLOT_MIN) * MIN_SLOT_MIN;
 const minsToTop = (m: number) => (m / 60) * HOUR_PX;
 const topToMins = (y: number) => (y / HOUR_PX) * 60;
@@ -215,6 +274,25 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect, onDelete 
             const dayLabel = mskDayLabel(dayMsk);
             const list = perDay.get(dayUtc0) ?? [];
 
+            const layout = computeOverlapLayout(list, minutesSinceMskMidnight);
+            
+            // Compute lane index per event key (0..n) using greedy scan
+            const sorted = [...list].sort((a, b) =>
+              new Date(a.startUtc).getTime() - new Date(b.startUtc).getTime()
+              || new Date(a.endUtc).getTime() - new Date(b.endUtc).getTime()
+            );
+            const laneByKey = new Map<string, number>();
+            const laneEnds: number[] = []; // laneEnds[i] = endMin of last event in lane i
+
+            for (const e of sorted) {
+              const s = startMin(e), en = endMin(e);
+              let lane = 0;
+              // find first lane that has ended
+              while (lane < laneEnds.length && laneEnds[lane] > s) lane++;
+              laneByKey.set(evKey(e), lane);
+              laneEnds[lane] = en;
+            }
+
             return (
               <div key={i} className="border border-zinc-700 rounded">
                 {/* Column header */}
@@ -264,15 +342,17 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect, onDelete 
                     const height = Math.max(minsToTop(endMin - startMin), minsToTop(MIN_SLOT_MIN));
                     const durMin = endMin - startMin;
                     const selected = selectedId && e.id === selectedId;
-
+                    const keyStr = evKey(e);
+                    const lay = layout.get(keyStr) ?? { left: 4, right: 4, z: 10 };
+                    
                     return (
                       <div
-                        key={(e.id ?? '') + e.startUtc}
-                        className={`absolute left-1 right-1 rounded border text-xs ${selected
+                        key={keyStr}
+                        className={`absolute rounded border text-xs ${selected
                           ? 'border-blue-400 ring-2 ring-blue-400 bg-zinc-700/90'
                           : 'border-zinc-600 bg-zinc-800/90 hover:bg-zinc-700/90'
                         }`}
-                        style={{ top, height }}
+                        style={{ top, height, left: lay.left, right: lay.right, zIndex: lay.z }}
                         onClick={(ev) => { ev.stopPropagation(); if (e.id) setSelectedId(e.id); }}
                         onMouseDown={(ev) => {
                           // Use the day track rect, not the event rect (scroll-correct)
@@ -312,24 +392,36 @@ export function WeekGrid({ events, onCreate, onMoveOrResize, onSelect, onDelete 
                     );
                   })}
 
-                  {/* create/resize draft (only in active column) */}
-                  {drag && (drag.kind === 'create' || drag.kind === 'resize-start' || drag.kind === 'resize-end') && drag.dayUtc0 === dayUtc0 && (() => {
-                    const a = drag.kind === 'create'
-                      ? Math.min(drag.startMin, drag.curMin)
-                      : Math.min(drag.curMin, drag.otherEndMin);
-                    const b = drag.kind === 'create'
-                      ? Math.max(drag.startMin, drag.curMin)
-                      : Math.max(drag.curMin, drag.otherEndMin);
+                  {/** CREATE ghost: match target event width */}
+                  {drag && drag.kind === 'create' && drag.dayUtc0 === dayUtc0 && (() => {
+                    const a = Math.min(drag.startMin, drag.curMin);
+                    const b = Math.max(drag.startMin, drag.curMin);
                     const top = minsToTop(a);
                     const height = Math.max(minsToTop(b - a), minsToTop(MIN_SLOT_MIN));
-                    return <div className="absolute left-1 right-1 rounded border border-emerald-500/70 bg-emerald-500/20 pointer-events-none" style={{ top, height }} />;
+                    return <div className="absolute bg-emerald-500/20 pointer-events-none"
+                                style={{ top, height, left: 4, right: 4 }} />;
                   })()}
 
-                  {/* move draft (only in active column) */}
+                  {/** RESIZE ghost: match target event width */}
+                  {drag && (drag.kind === 'resize-start' || drag.kind === 'resize-end') && drag.dayUtc0 === dayUtc0 && (() => {
+                    const target = list.find(x => x.id === drag.id);
+                    const lay = target ? (layout.get(evKey(target)) ?? { left: 4, right: 4, z: 99 }) : { left: 4, right: 4, z: 99 };
+                    const a = Math.min(drag.curMin, drag.otherEndMin);
+                    const b = Math.max(drag.curMin, drag.otherEndMin);
+                    const top = minsToTop(a);
+                    const height = Math.max(minsToTop(b - a), minsToTop(MIN_SLOT_MIN));
+                    return <div className="absolute bg-emerald-500/20 pointer-events-none"
+                                style={{ top, height, left: lay.left, right: lay.right }} />;
+                  })()}
+
+                  {/** MOVE ghost: match target event width */}
                   {drag && drag.kind === 'move' && drag.dayUtc0 === dayUtc0 && (() => {
+                    const target = list.find(x => x.id === drag.id);
+                    const lay = target ? (layout.get(evKey(target)) ?? { left: 4, right: 4, z: 99 }) : { left: 4, right: 4, z: 99 };
                     const top = minsToTop(clampMins(snapMin(drag.offsetMin)));
                     const height = minsToTop(drag.durMin);
-                    return <div className="absolute left-1 right-1 rounded border border-sky-500/70 bg-sky-500/20 pointer-events-none" style={{ top, height }} />;
+                    return <div className="absolute bg-sky-500/20 pointer-events-none"
+                                style={{ top, height, left: lay.left, right: lay.right }} />;
                   })()}
                 </div>
               </div>

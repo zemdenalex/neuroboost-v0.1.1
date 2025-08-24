@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api';
 
 type Status = {
   ok: boolean;
@@ -11,9 +12,8 @@ type Status = {
 export default function NudgeBadge() {
   const [s, setS] = useState<Status | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
   useEffect(() => {
-    fetch('/status/nudges')
+    fetch(`${API_BASE}/status/nudges`)
       .then(r => r.json())
       .then(setS)
       .catch(e => setErr(String(e)));

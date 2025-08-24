@@ -11,6 +11,15 @@ const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
 
+// --- CORS MUST BE BEFORE ROUTES ---
+const allow = [/^http:\/\/localhost:51\d{2}$/]; // allow Vite 5173–5179 and curl (no-origin)
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    cb(null, allow.some(rx => rx.test(origin)));
+  }
+}));
+
 // Health with DB round-trip + UTC confirmation
 app.get('/health', async (_req, res) => {
   try {
@@ -21,10 +30,20 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-// Minimal dry-run exporter endpoint
-// Query ?vault=/absolute/path/to/your/ObsidianVault  (optional)
-// ALWAYS confines to NeuroBoost/; NEVER writes.
+// --- /status/route (for shell/web stub hardening) ---
+app.get('/status/route', (_req, res) => {
+  const primary = process.env.NB_ROUTE_PRIMARY || 'telegram-stub';
+  const quiet = process.env.NB_QUIET || ''; // "HH:mm-HH:mm"
+  res.json({
+    ok: true,
+    primary,
+    dedupeWindowSec: 120,
+    quietHours: quiet,
+    writesEnabled: false
+  });
+});
 
+// --- Export (dry-run only; confined to NeuroBoost/) ---
 function confineToNeuroBoost(vaultPathAbs) {
   const root = path.resolve(vaultPathAbs ?? process.cwd());
   const nbRoot = path.join(root, 'NeuroBoost');
@@ -32,81 +51,77 @@ function confineToNeuroBoost(vaultPathAbs) {
 }
 
 app.get('/export/dry-run', async (req, res) => {
-  const VAULT = req.query.vault ? String(req.query.vault) : undefined;
-  const { nbRoot } = confineToNeuroBoost(VAULT);
+  try {
+    const VAULT = req.query.vault ? String(req.query.vault) : undefined;
+    const { nbRoot } = confineToNeuroBoost(VAULT);
 
-  // Collect minimal slices
-  const [tasks, events] = await Promise.all([
-    prisma.task.findMany({ include: { subtasks: true } }),
-    prisma.event.findMany({ include: { reminders: true } })
-  ]);
+    const [tasks, events] = await Promise.all([
+      prisma.task.findMany({ include: { subtasks: true } }).catch(() => []),
+      prisma.event.findMany({ include: { reminders: true } }).catch(() => []),
+    ]);
 
-  // Compose planned files (no writes)
-  const ops = [];
+    const files = [];
 
-  // Tasks -> NeuroBoost/tasks/<id>.md
-  for (const t of tasks) {
-    const rel = path.join('NeuroBoost', 'tasks', `${t.id}.md`);
-    const preview = [
-      `---`,
-      `id: ${t.id}`,
-      `type: task`,
-      `priority: ${t.priority}`,
-      `status: ${t.status}`,
-      `tags: ["#neuroboost"]`,
-      `---`,
-      ``,
-      `# ${t.title}`,
-      t.description ?? ''
-    ].join('\n');
-    ops.push({ relPath: rel, bytes: Buffer.byteLength(preview, 'utf8') });
+    // Tasks -> NeuroBoost/tasks/<id>.md
+    for (const t of tasks) {
+      const rel = path.join('NeuroBoost', 'tasks', `${t.id}.md`);
+      const preview = [
+        '---',
+        `id: ${t.id}`,
+        'type: task',
+        `priority: ${t.priority}`,
+        `status: ${t.status}`,
+        `tags: ["#neuroboost"]`,
+        '---',
+        '',
+        `# ${t.title}`,
+        t.description ?? ''
+      ].join('\n');
+      let action = 'create';
+      try { await fs.access(path.join(nbRoot, 'tasks', `${t.id}.md`)); action = 'update'; } catch {}
+      files.push({
+        path: rel.replace(/\\/g, '/'),
+        action,
+        bytes: Buffer.byteLength(preview, 'utf8')
+      });
+    }
+
+    // Events -> NeuroBoost/calendar/<YYYY>/<YYYY-MM-DD>__<id>.md
+    const fmtDay = (d) => new Date(d).toISOString().slice(0, 10);
+    for (const ev of events) {
+      const day = fmtDay(ev.startsAt);
+      const year = day.slice(0, 4);
+      const rel = path.join('NeuroBoost', 'calendar', year, `${day}__${ev.id}.md`);
+      const preview = [
+        '---',
+        `id: ${ev.id}`,
+        'type: event',
+        `all_day: ${!!ev.allDay}`,
+        `rrule: ${ev.rrule ?? ''}`,
+        `starts_at_utc: ${new Date(ev.startsAt).toISOString()}`,
+        `ends_at_utc: ${new Date(ev.endsAt).toISOString()}`,
+        `tags: ["#neuroboost","#calendar"]`,
+        '---',
+        '',
+        `# ${ev.title}`
+      ].join('\n');
+      let action = 'create';
+      try { await fs.access(path.join(nbRoot, 'calendar', year, `${day}__${ev.id}.md`)); action = 'update'; } catch {}
+      files.push({
+        path: rel.replace(/\\/g, '/'),
+        action,
+        bytes: Buffer.byteLength(preview, 'utf8')
+      });
+    }
+
+    // Confinement guard (no ".." and under NeuroBoost/)
+    const safe = files.filter(f => !f.path.includes('..') && f.path.startsWith('NeuroBoost/'));
+
+    res.json({ mode: 'dry-run', planned: safe.length, files: safe.slice(0, 50) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
   }
-
-  // Events -> NeuroBoost/calendar/<YYYY>/<YYYY-MM-DD>__<id>.md
-  const fmt = (d) => new Date(d).toISOString().slice(0, 10);
-  for (const ev of events) {
-    const day = fmt(ev.startsAt);
-    const year = day.slice(0, 4);
-    const rel = path.join('NeuroBoost', 'calendar', year, `${day}__${ev.id}.md`);
-    const preview = [
-      `---`,
-      `id: ${ev.id}`,
-      `type: event`,
-      `all_day: ${ev.allDay}`,
-      `rrule: ${ev.rrule ?? ''}`,
-      `starts_at_utc: ${new Date(ev.startsAt).toISOString()}`,
-      `ends_at_utc: ${new Date(ev.endsAt).toISOString()}`,
-      `tags: ["#neuroboost","#calendar"]`,
-      `---`,
-      ``,
-      `# ${ev.title}`
-    ].join('\n');
-    ops.push({ relPath: rel, bytes: Buffer.byteLength(preview, 'utf8') });
-  }
-
-  // Confinement check (no path escapes)
-  const safe = ops.filter(o => !path.normalize(o.relPath).includes('..') && o.relPath.startsWith('NeuroBoost' + path.sep));
-  res.json({ mode: 'dry-run', planned: safe.length, files: safe.slice(0, 25) /* preview first 25 */ });
 });
-
-// Start
-const PORT = process.env.API_PORT ? Number(process.env.API_PORT) : 3001;
-app.listen(PORT, () => {
-  console.log(`@nb/api listening on http://localhost:${PORT}`);
-});
-
-// old:
-// app.use(cors({ origin: 'http://localhost:5173' }));
-
-// new: allow vite 5173–5179 (and no-origin like curl)
-const allow = [/^http:\/\/localhost:51\d{2}$/];
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    cb(null, allow.some(rx => rx.test(origin)));
-  }
-}));
-
 
 // ---- helpers ----
 function toDate(v) { const d = new Date(v); if (isNaN(d)) throw new Error('Bad date'); return d; }
@@ -361,4 +376,10 @@ app.get('/healthz/db', async (_req, res) => {
     console.error('[healthz/db] error:', e);
     res.status(200).json({ ok: false, error: 'db-unavailable' });
   }
+});
+
+// Start (keep at the end)
+const PORT = process.env.API_PORT ? Number(process.env.API_PORT) : 3001;
+app.listen(PORT, () => {
+  console.log(`@nb/api listening on http://localhost:${PORT}`);
 });

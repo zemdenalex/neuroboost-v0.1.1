@@ -7,14 +7,21 @@ export default function ExportPanel() {
   const [items, setItems] = useState<DryRunItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
+    
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch(`${API_BASE}/export/dry-run`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
-        setItems(Array.isArray(j.files) ? j.files : []);
+        const normalized = Array.isArray(j.files)
+          ? j.files.map((f: any) => ({
+              path: f.path ?? f.relPath ?? '',
+              action: f.action ?? '',
+              bytes: f.bytes ?? 0
+            }))
+          : [];
+        setItems(normalized);
       } catch (e:any) {
         setErr(e.message || String(e));
       } finally { setLoading(false); }
