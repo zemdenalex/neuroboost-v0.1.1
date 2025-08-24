@@ -7,6 +7,8 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "baseUrl": ".",
-    "paths": {}
+    "paths": {},
+    "skipLibCheck": true,
+    "types": ["vite/client"] 
   }
 }
